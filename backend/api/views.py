@@ -16,10 +16,11 @@ from django.contrib.auth.models import User, Group
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from .services.chirpstack import create_chirpstack_device
-from django.db import models
+from django.db import models, transaction
 from datetime import datetime, timedelta
 from django.db.models import Count, Avg, F, Q
 import random
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 
 # Користувацькі права доступу
 class IsMedicalStaff(BasePermission):
@@ -40,7 +41,7 @@ class IsAnalyst(BasePermission):
 class IsAdmin(BasePermission):
     """Перевірка чи користувач є адміністратором"""
     def has_permission(self, request, view):
-        return request.user.is_superuser
+        return request.user.is_superuser or (hasattr(request.user, 'profile') and request.user.profile.role == 'ADMIN')
 
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -48,7 +49,10 @@ class UserProfileView(APIView):
     def get(self, request):
         user = request.user
         serializer = UserSerializer(user)
-        return Response(serializer.data)
+        data = serializer.data
+        # Додаємо поле is_admin
+        data['is_admin'] = user.is_superuser or (hasattr(user, 'profile') and user.profile.role == 'ADMIN')
+        return Response(data)
     
     def put(self, request):
         user = request.user
@@ -1176,15 +1180,21 @@ class UserManagementView(APIView):
         """Створити нового користувача"""
         serializer = UserCreateSerializer(data=request.data)
         if serializer.is_valid():
-            user = serializer.save()
-            
-            # Логування створення користувача
-            log_security_action(request, f"Створено нового користувача: {user.username}")
-            
-            return Response(
-                UserSerializer(user).data,
-                status=status.HTTP_201_CREATED
-            )
+            try:
+                user = serializer.save()
+                
+                # Логування створення користувача
+                log_security_action(request, f"Створено нового користувача: {user.username}")
+                
+                return Response(
+                    UserSerializer(user).data,
+                    status=status.HTTP_201_CREATED
+                )
+            except Exception as e:
+                return Response(
+                    {"error": f"Помилка при створенні користувача: {str(e)}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 class UserDetailView(APIView):
@@ -1207,32 +1217,53 @@ class UserDetailView(APIView):
         user = self.get_object(pk)
         serializer = UserSerializer(user, data=request.data, partial=True)
         if serializer.is_valid():
-            user = serializer.save()
-            
-            # Логування оновлення користувача
-            log_security_action(request, f"Оновлено дані користувача: {user.username}")
-            
-            return Response(serializer.data)
+            try:
+                user = serializer.save()
+                
+                # Логування оновлення користувача
+                log_security_action(request, f"Оновлено дані користувача: {user.username}")
+                
+                return Response(serializer.data)
+            except Exception as e:
+                return Response(
+                    {"error": f"Помилка при оновленні користувача: {str(e)}"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
     
     def delete(self, request, pk):
         """Видалити користувача"""
-        user = self.get_object(pk)
-        username = user.username
-        
-        # Не дозволяємо видаляти самого себе
-        if user == request.user:
+        try:
+            with transaction.atomic():
+                user = self.get_object(pk)
+                username = user.username
+                
+                # Не дозволяємо видаляти самого себе
+                if user == request.user:
+                    return Response(
+                        {"error": "Неможливо видалити власний обліковий запис"},
+                        status=status.HTTP_400_BAD_REQUEST
+                    )
+                
+                # Видаляємо всі токени користувача
+                OutstandingToken.objects.filter(user_id=user.id).delete()
+                
+                # Видаляємо профіль користувача
+                if hasattr(user, 'profile'):
+                    user.profile.delete()
+                
+                # Видаляємо користувача
+                user.delete()
+                
+                # Логування видалення користувача
+                log_security_action(request, f"Видалено користувача: {username}")
+                
+                return Response(status=status.HTTP_204_NO_CONTENT)
+        except Exception as e:
             return Response(
-                {"error": "Неможливо видалити власний обліковий запис"},
+                {"error": f"Помилка при видаленні користувача: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST
             )
-        
-        user.delete()
-        
-        # Логування видалення користувача
-        log_security_action(request, f"Видалено користувача: {username}")
-        
-        return Response(status=status.HTTP_204_NO_CONTENT)
 
 class UserPasswordChangeView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]

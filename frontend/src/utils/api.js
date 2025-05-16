@@ -76,7 +76,8 @@ const authService = {
     try {
       // Явно отримуємо CSRF токен перед перевіркою аутентифікації
       await fetchCSRFToken();
-      const response = await api.get('/api/profile/');
+      // Робимо запит до профілю для перевірки сесії
+      await api.get('/api/profile/');
       return true;
     } catch (error) {
       return false;
@@ -90,6 +91,10 @@ const authService = {
       if (response.data.success) {
         localStorage.setItem('isAuthenticated', 'true');
         localStorage.setItem('username', response.data.username);
+        
+        // Встановлюємо статус адміністратора в localStorage
+        const isAdmin = response.data.is_admin === true;
+        localStorage.setItem('isAdmin', isAdmin.toString());
       }
       
       return response.data;
@@ -103,6 +108,7 @@ const authService = {
       await api.post('/api/auth/logout/');
       localStorage.removeItem('isAuthenticated');
       localStorage.removeItem('username');
+      localStorage.removeItem('isAdmin');
     } catch (error) {
       throw error;
     }

@@ -7,7 +7,6 @@ import {
   TextField,
   Button,
   Grid,
-  Divider,
   Alert,
   CircularProgress,
   Snackbar,
@@ -191,7 +190,7 @@ const Profile = () => {
       setEditMode(false);
     } catch (err) {
       console.error('Помилка оновлення профілю:', err);
-      setError('Не вдалося оновити профіль');
+      setError(err.response?.data?.error || 'Не вдалося оновити профіль');
     } finally {
       setLoading(false);
     }
@@ -330,12 +329,16 @@ const Profile = () => {
         setSuccessMessage('Користувача успішно оновлено');
       } else {
         // Створення нового користувача
+        if (!userFormData.username || !userFormData.password) {
+          setError('Ім\'я користувача та пароль обов\'язкові');
+          return;
+        }
         await userService.createUser(userFormData);
         setSuccessMessage('Користувача успішно створено');
       }
       
       // Оновлюємо список користувачів
-      fetchAllUsers();
+      await fetchAllUsers();
       setUserDialogOpen(false);
     } catch (err) {
       console.error('Помилка збереження користувача:', err);
@@ -382,8 +385,9 @@ const Profile = () => {
       await userService.deleteUser(selectedUser.id);
       setSuccessMessage('Користувача успішно видалено');
       // Оновлюємо список користувачів
-      fetchAllUsers();
+      await fetchAllUsers();
       setDeleteDialogOpen(false);
+      setSelectedUser(null);
     } catch (err) {
       console.error('Помилка видалення користувача:', err);
       setError(err.response?.data?.error || 'Не вдалося видалити користувача');

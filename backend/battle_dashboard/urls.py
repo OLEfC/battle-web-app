@@ -44,10 +44,13 @@ def api_login(request):
         
         if user is not None:
             login(request, user)
+            # Перевіряємо статус адміністратора
+            is_admin = user.is_superuser or (hasattr(user, 'profile') and user.profile.role == 'ADMIN')
             return JsonResponse({
                 'success': True,
                 'username': username,
-                'user_id': user.id
+                'user_id': user.id,
+                'is_admin': is_admin
             })
         else:
             return JsonResponse({

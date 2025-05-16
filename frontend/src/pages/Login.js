@@ -51,6 +51,8 @@ const Login = () => {
       const response = await authService.login(username, password);
       
       if (response.success) {
+        // Зберігаємо інформацію про статус адміністратора
+        localStorage.setItem('isAdmin', response.is_admin.toString());
         navigate('/map');
       } else {
         setError(response.message || 'Помилка входу');

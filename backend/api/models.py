@@ -158,8 +158,10 @@ class UserProfile(models.Model):
         ordering = ['user__username']
     
     def save(self, *args, **kwargs):
+        """Зберігає профіль користувача та оновлює його групи"""
         # При створенні/оновленні профілю, оновлюємо групи користувача
         super().save(*args, **kwargs)
+        # Оновлюємо групи користувача після збереження профілю
         self.update_user_groups()
     
     def update_user_groups(self):

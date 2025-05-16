@@ -6,12 +6,14 @@ import LogoutIcon from '@mui/icons-material/Logout';
 import MapIcon from '@mui/icons-material/Map';
 import PeopleIcon from '@mui/icons-material/People';
 import AccountCircleIcon from '@mui/icons-material/AccountCircle';
+import AdminPanelSettingsIcon from '@mui/icons-material/AdminPanelSettings';
 
 import { authService } from '../utils/api';
 
 const Navigation = ({ toggleDrawer }) => {
   const navigate = useNavigate();
   const location = useLocation();
+  const isAdmin = localStorage.getItem('isAdmin') === 'true';
   
   const handleLogout = async () => {
     try {
@@ -21,6 +23,7 @@ const Navigation = ({ toggleDrawer }) => {
       console.error('Помилка виходу:', err);
       localStorage.removeItem('isAuthenticated');
       localStorage.removeItem('username');
+      localStorage.removeItem('isAdmin');
       navigate('/login');
     }
   };
@@ -76,6 +79,19 @@ const Navigation = ({ toggleDrawer }) => {
           >
             Профіль
           </Button>
+          {isAdmin && (
+            <Button 
+              color="inherit" 
+              startIcon={<AdminPanelSettingsIcon />}
+              onClick={() => navigate('/admin/users')}
+              sx={{ 
+                mr: 1,
+                bgcolor: location.pathname === '/admin/users' ? 'rgba(255,255,255,0.2)' : 'transparent',
+              }}
+            >
+              Адміністрування
+            </Button>
+          )}
         </Box>
         
         <Button color="inherit" onClick={handleLogout} startIcon={<LogoutIcon />}>

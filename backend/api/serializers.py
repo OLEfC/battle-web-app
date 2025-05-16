@@ -3,6 +3,7 @@ from .models import Soldier, MedicalData, Alert, Evacuation, UserProfile
 from django.utils import timezone
 from django.contrib.auth.models import User, Group
 from django.contrib.auth.password_validation import validate_password
+from django.db import transaction
 
 class MedicalDataSerializer(serializers.ModelSerializer):
     issue_type_display = serializers.SerializerMethodField()
@@ -122,23 +123,29 @@ class GroupSerializer(serializers.ModelSerializer):
         fields = ['id', 'name']
 
 class UserProfileSerializer(serializers.ModelSerializer):
-    role_display = serializers.SerializerMethodField()
-    
     class Meta:
         model = UserProfile
-        fields = ['id', 'role', 'role_display', 'phone', 'position', 'unit', 'last_activity']
-    
-    def get_role_display(self, obj):
-        return obj.get_role_display()
+        fields = ['role', 'phone', 'position', 'unit']
+        extra_kwargs = {
+            'role': {'required': True},
+            'phone': {'required': False, 'allow_blank': True},
+            'position': {'required': False, 'allow_blank': True},
+            'unit': {'required': False, 'allow_blank': True}
+        }
 
 class UserSerializer(serializers.ModelSerializer):
     profile = UserProfileSerializer(required=False)
     groups = GroupSerializer(many=True, read_only=True)
+    is_admin = serializers.SerializerMethodField()
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'groups', 'is_staff', 'is_active', 'profile', 'last_login']
-        read_only_fields = ['is_staff', 'groups', 'last_login']
+        fields = ['id', 'username', 'email', 'first_name', 'last_name', 'groups', 'is_staff', 'is_active', 'profile', 'last_login', 'is_admin']
+        read_only_fields = ['is_staff', 'groups', 'last_login', 'is_admin']
+    
+    def get_is_admin(self, obj):
+        """Визначає, чи є користувач адміністратором"""
+        return obj.is_superuser or (hasattr(obj, 'profile') and obj.profile.role == 'ADMIN')
     
     def update(self, instance, validated_data):
         profile_data = validated_data.pop('profile', None)
@@ -160,11 +167,11 @@ class UserSerializer(serializers.ModelSerializer):
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
-    profile = UserProfileSerializer(required=False)
+    profile = UserProfileSerializer(required=True)
     
     class Meta:
         model = User
-        fields = ['id', 'username', 'password', 'password2', 'email', 'first_name', 'last_name', 'profile']
+        fields = ['username', 'password', 'password2', 'email', 'first_name', 'last_name', 'profile']
     
     def validate(self, attrs):
         if attrs['password'] != attrs['password2']:
@@ -172,26 +179,42 @@ class UserCreateSerializer(serializers.ModelSerializer):
         return attrs
     
     def create(self, validated_data):
-        validated_data.pop('password2', None)
-        profile_data = validated_data.pop('profile', None)
+        """Створює нового користувача та його профіль"""
+        # Видаляємо password2, оскільки він нам більше не потрібен
+        validated_data.pop('password2')
         
-        user = User.objects.create(
-            username=validated_data['username'],
-            email=validated_data.get('email', ''),
-            first_name=validated_data.get('first_name', ''),
-            last_name=validated_data.get('last_name', '')
-        )
+        # Отримуємо дані профілю
+        profile_data = validated_data.pop('profile')
         
-        user.set_password(validated_data['password'])
-        user.save()
-        
-        # Створюємо профіль користувача з роллю за замовчуванням
-        if profile_data:
-            UserProfile.objects.create(user=user, **profile_data)
-        else:
-            UserProfile.objects.create(user=user, role='VIEWER')
-        
-        return user
+        try:
+            with transaction.atomic():
+                # Створюємо користувача
+                user = User.objects.create(
+                    username=validated_data['username'],
+                    email=validated_data.get('email', ''),
+                    first_name=validated_data.get('first_name', ''),
+                    last_name=validated_data.get('last_name', '')
+                )
+                
+                # Встановлюємо пароль
+                user.set_password(validated_data['password'])
+                user.save()
+                
+                # Створюємо профіль користувача
+                profile = UserProfile.objects.create(
+                    user=user,
+                    role=profile_data.get('role', 'VIEWER'),
+                    phone=profile_data.get('phone', ''),
+                    position=profile_data.get('position', ''),
+                    unit=profile_data.get('unit', '')
+                )
+                
+                # Оновлюємо групи користувача відповідно до ролі
+                profile.update_user_groups()
+                
+                return user
+        except Exception as e:
+            raise serializers.ValidationError(f"Помилка при створенні користувача: {str(e)}")
 
 class PasswordChangeSerializer(serializers.Serializer):
     old_password = serializers.CharField(required=True)
