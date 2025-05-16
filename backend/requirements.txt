@@ -1,0 +1,10 @@
+grpcio==1.71.0
+grpcio-tools==1.71.0
+protobuf==4.24.4
+python-dotenv==1.0.0
+django==5.0.3
+djangorestframework==3.14.0
+django-environ==0.11.2
+django-axes==6.1.1
+mysql-connector-python==8.0.33
+django-cors-headers>=4.0.0 
