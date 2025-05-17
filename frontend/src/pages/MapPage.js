@@ -279,7 +279,10 @@ const MapPage = () => {
         const validSoldiers = response.data.filter(
           soldier => soldier.latest_data && 
                     soldier.latest_data.latitude && 
-                    soldier.latest_data.longitude
+                    soldier.latest_data.longitude &&
+                    (!soldier.evacuation || 
+                     soldier.evacuation.status === 'NEEDED' || 
+                     soldier.evacuation.status === 'IN_PROGRESS')
         );
         
         setSoldiers(validSoldiers);
@@ -704,6 +707,15 @@ const MapPage = () => {
                                   SpO2: {item.medical_data.spo2}%, Пульс: {item.medical_data.heart_rate}
                                 </Box>
                               )}
+                              {item.soldier.evacuation && (
+                                <Box component="span" sx={{ display: 'block', mt: 1 }}>
+                                  <Chip 
+                                    label={getEvacuationStatus(item.soldier.evacuation)} 
+                                    color={getEvacuationStatusColor(item.soldier.evacuation)}
+                                    size="small"
+                                  />
+                                </Box>
+                              )}
                             </Box>
                           }
                         />
@@ -803,6 +815,15 @@ const MapPage = () => {
                             {!soldier.latest_data && (
                               <Box component="span" sx={{ display: 'block', mt: 1, fontStyle: 'italic' }}>
                                 Немає медичних даних
+                              </Box>
+                            )}
+                            {soldier.evacuation && (
+                              <Box component="span" sx={{ display: 'block', mt: 1 }}>
+                                <Chip 
+                                  label={getEvacuationStatus(soldier.evacuation)} 
+                                  color={getEvacuationStatusColor(soldier.evacuation)}
+                                  size="small"
+                                />
                               </Box>
                             )}
                           </Box>

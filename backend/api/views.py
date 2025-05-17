@@ -564,63 +564,44 @@ class SoldierViewSet(viewsets.ModelViewSet):
     def prioritized(self, request):
         """Отримати список поранених, відсортований за пріоритетом"""
         try:
-            # Виключаємо евакуйованих солдатів використовуючи is_evacuated
+            # Отримуємо всіх солдатів без фільтрації за евакуацією
             soldiers = Soldier.objects.all()
-            non_evacuated_soldiers = [s for s in soldiers if not s.is_evacuated]
             
             # Дані для фронтенду - потрібен плоский список
             result_list = []
             
-            for soldier in non_evacuated_soldiers:
+            for soldier in soldiers:
                 # Отримуємо останні медичні дані
                 try:
                     latest_data = MedicalData.objects.filter(device=soldier).order_by('-timestamp').first()
                     serialized_soldier = SoldierDetailSerializer(soldier).data
                     
+                    # Додаємо останні медичні дані до результату
                     if latest_data:
-                        # Додаємо останні дані до даних солдата
                         serialized_soldier['latest_data'] = MedicalDataSerializer(latest_data).data
-                        
-                        # Додаємо пріоритет за типом проблеми
-                        if latest_data.issue_type == 'BOTH':
-                            serialized_soldier['priority'] = 1  # критичний
-                        elif latest_data.issue_type in ['SPO2', 'HR']:
-                            serialized_soldier['priority'] = 2  # високий
-                        elif latest_data.issue_type == 'SENSOR_ERROR':
-                            serialized_soldier['priority'] = 3  # попередження
-                        else:
-                            serialized_soldier['priority'] = 4  # нормальний
-                    else:
-                        # Якщо немає даних, додаємо порожні значення та найнижчий пріоритет
-                        serialized_soldier['latest_data'] = None
-                        serialized_soldier['priority'] = 5  # невідомий/немає даних
                     
-                    # Додаємо дані евакуації, якщо вони є
+                    # Додаємо інформацію про евакуацію
                     try:
                         evacuation = soldier.evacuation
-                        serialized_soldier['evacuation'] = EvacuationSerializer(evacuation).data
+                        serialized_soldier['evacuation'] = {
+                            'status': evacuation.status,
+                            'evacuation_time': evacuation.evacuation_time,
+                            'evacuation_started': evacuation.evacuation_started,
+                            'priority': evacuation.priority
+                        }
                     except Evacuation.DoesNotExist:
                         serialized_soldier['evacuation'] = None
                     
-                    # Додаємо у загальний список
                     result_list.append(serialized_soldier)
-                    
                 except Exception as e:
-                    # Логування помилки
-                    print(f"Помилка при обробці солдата {soldier.devEui}: {str(e)}")
+                    logger.error(f"Помилка при обробці медичних даних для солдата {soldier.devEui}: {str(e)}")
                     continue
-            
-            # Сортуємо за пріоритетом (спочатку критичні)
-            result_list.sort(key=lambda x: x.get('priority', 5))
             
             return Response(result_list)
         except Exception as e:
-            # Детальне логування помилки для відлагодження
-            import traceback
-            print(f"Глобальна помилка в prioritized: {str(e)}")
-            print(traceback.format_exc())
+            logger.error(f"Помилка при отриманні списку солдатів: {str(e)}")
             return Response(
-                {"error": f"Internal server error: {str(e)}"},
+                {'error': 'Помилка при отриманні списку солдатів'},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 

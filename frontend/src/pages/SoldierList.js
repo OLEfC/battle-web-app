@@ -30,6 +30,8 @@ import LocalHospitalIcon from '@mui/icons-material/LocalHospital';
 import PersonIcon from '@mui/icons-material/Person';
 import FilterListIcon from '@mui/icons-material/FilterList';
 import RefreshIcon from '@mui/icons-material/Refresh';
+import ArrowUpwardIcon from '@mui/icons-material/ArrowUpward';
+import ArrowDownwardIcon from '@mui/icons-material/ArrowDownward';
 
 import Navigation from '../components/Navigation';
 import AddSoldierForm from '../components/AddSoldierForm';
@@ -44,6 +46,9 @@ const SoldierList = () => {
   const [tabValue, setTabValue] = useState(0); // 0 = всі, 1 = поранені
   const [refreshing, setRefreshing] = useState(false); // Додаємо стан для індикатора оновлення
   const [lastUpdate, setLastUpdate] = useState(null); // Додаємо стан для останнього оновлення
+  const [showEvacuated, setShowEvacuated] = useState(true); // Додаємо стан для показу евакуйованих
+  const [sortField, setSortField] = useState('status'); // Змінюємо з 'last_name' на 'status'
+  const [sortDirection, setSortDirection] = useState('asc'); // Додаємо стан для напрямку сортування
   const navigate = useNavigate();
 
   // Виносимо fetchSoldiers у useCallback, щоб правильно використовувати у useEffect
@@ -159,15 +164,69 @@ const SoldierList = () => {
   const woundedSoldiers = soldiers.filter(soldier => soldier.latest_data);
   const allSoldiers = soldiers;
   
-  // Фільтрація і пошук солдатів
+  // Додаємо функцію для сортування
+  const sortSoldiers = (soldiersArray) => {
+    return [...soldiersArray].sort((a, b) => {
+      let comparison = 0;
+      
+      switch (sortField) {
+        case 'last_name':
+          comparison = a.last_name.localeCompare(b.last_name);
+          break;
+        case 'first_name':
+          comparison = a.first_name.localeCompare(b.first_name);
+          break;
+        case 'unit':
+          comparison = (a.unit || '').localeCompare(b.unit || '');
+          break;
+        case 'status':
+          // Сортування за статусом (критичний стан має вищий пріоритет)
+          const getStatusPriority = (soldier) => {
+            if (!soldier.latest_data) return 0;
+            switch (soldier.latest_data.issue_type) {
+              case 'BOTH': return 3;
+              case 'SPO2': return 2;
+              case 'HR': return 1;
+              default: return 0;
+            }
+          };
+          comparison = getStatusPriority(b) - getStatusPriority(a);
+          break;
+        case 'evacuation':
+          // Сортування за статусом евакуації
+          const getEvacuationPriority = (soldier) => {
+            if (!soldier.evacuation) return 0;
+            switch (soldier.evacuation.status) {
+              case 'IN_PROGRESS': return 3;
+              case 'NEEDED': return 2;
+              case 'EVACUATED': return 1;
+              default: return 0;
+            }
+          };
+          comparison = getEvacuationPriority(b) - getEvacuationPriority(a);
+          break;
+        default:
+          comparison = 0;
+      }
+      
+      return sortDirection === 'asc' ? comparison : -comparison;
+    });
+  };
+
+  // Модифікуємо функцію фільтрації
   const getFilteredSoldiers = (soldiersArray) => {
     return soldiersArray.filter(soldier => {
-      // Спочатку фільтруємо за пошуковим терміном
+      // Фільтруємо евакуйованих, якщо потрібно
+      if (!showEvacuated && soldier.evacuation && soldier.evacuation.status === 'EVACUATED') {
+        return false;
+      }
+
+      // Фільтруємо за пошуковим терміном
       const matchesSearch = 
         (soldier.first_name + ' ' + soldier.last_name).toLowerCase().includes(searchTerm.toLowerCase()) ||
         (soldier.unit && soldier.unit.toLowerCase().includes(searchTerm.toLowerCase()));
       
-      // Потім фільтруємо за станом
+      // Фільтруємо за станом
       if (filter === 'all') return matchesSearch;
       if (filter === 'critical') {
         return matchesSearch && soldier.latest_data && 
@@ -177,17 +236,24 @@ const SoldierList = () => {
       }
       if (filter === 'evacuation') {
         return matchesSearch && soldier.evacuation && 
-               soldier.evacuation.status === 'IN_PROGRESS';
+               (soldier.evacuation.status === 'IN_PROGRESS' || 
+                soldier.evacuation.status === 'EVACUATED');
       }
       if (filter === 'needs_evacuation') {
         return matchesSearch && soldier.evacuation && 
                soldier.evacuation.status === 'NEEDED';
       }
+      if (filter === 'evacuated') {
+        return matchesSearch && soldier.evacuation && 
+               soldier.evacuation.status === 'EVACUATED';
+      }
       return matchesSearch;
     });
   };
   
-  const currentSoldiers = tabValue === 0 ? getFilteredSoldiers(allSoldiers) : getFilteredSoldiers(woundedSoldiers);
+  const currentSoldiers = sortSoldiers(
+    tabValue === 0 ? getFilteredSoldiers(allSoldiers) : getFilteredSoldiers(woundedSoldiers)
+  );
 
   if (loading) {
     return (
@@ -261,28 +327,23 @@ const SoldierList = () => {
                 {/* Додаємо статистику */}
                 <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
                   <Chip 
-                    label={`Критичний стан: ${soldiers.filter(s => s.latest_data && s.latest_data.issue_type === 'BOTH').length}`} 
+                    label={`Критичний стан: ${soldiers.filter(s => s.latest_data && s.latest_data.issue_type === 'BOTH' && (!s.evacuation || s.evacuation.status !== 'EVACUATED')).length}`} 
                     color="error" 
                     variant="outlined"
                   />
                   <Chip 
-                    label={`Проблеми SpO2: ${soldiers.filter(s => s.latest_data && s.latest_data.issue_type === 'SPO2').length}`} 
+                    label={`Проблеми SpO2: ${soldiers.filter(s => s.latest_data && s.latest_data.issue_type === 'SPO2' && (!s.evacuation || s.evacuation.status !== 'EVACUATED')).length}`} 
                     color="error" 
                     variant="outlined"
                   />
                   <Chip 
-                    label={`Проблеми пульсу: ${soldiers.filter(s => s.latest_data && s.latest_data.issue_type === 'HR').length}`} 
+                    label={`Проблеми пульсу: ${soldiers.filter(s => s.latest_data && s.latest_data.issue_type === 'HR' && (!s.evacuation || s.evacuation.status !== 'EVACUATED')).length}`} 
                     color="warning" 
                     variant="outlined"
                   />
                   <Chip 
                     label={`В евакуації: ${soldiers.filter(s => s.evacuation && s.evacuation.status === 'IN_PROGRESS').length}`} 
                     color="primary" 
-                    variant="outlined"
-                  />
-                  <Chip 
-                    label={`Потребують евакуації: ${soldiers.filter(s => s.evacuation && s.evacuation.status === 'NEEDED').length}`} 
-                    color="warning" 
                     variant="outlined"
                   />
                   <Chip 
@@ -299,7 +360,37 @@ const SoldierList = () => {
                       : {currentSoldiers.length} записів
                     </Typography>
                   </Box>
-                  <Box sx={{ display: 'flex', gap: 2 }}>
+                  <Box sx={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                    <FormControl size="small" sx={{ minWidth: 150 }}>
+                      <InputLabel id="sort-label">Сортування</InputLabel>
+                      <Select
+                        labelId="sort-label"
+                        value={sortField}
+                        label="Сортування"
+                        onChange={(e) => setSortField(e.target.value)}
+                      >
+                        <MenuItem value="last_name">За прізвищем</MenuItem>
+                        <MenuItem value="first_name">За ім'ям</MenuItem>
+                        <MenuItem value="unit">За підрозділом</MenuItem>
+                        <MenuItem value="status">За станом</MenuItem>
+                        <MenuItem value="evacuation">За евакуацією</MenuItem>
+                      </Select>
+                    </FormControl>
+                    <Button
+                      size="small"
+                      onClick={() => setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc')}
+                      startIcon={sortDirection === 'asc' ? <ArrowUpwardIcon /> : <ArrowDownwardIcon />}
+                    >
+                      {sortDirection === 'asc' ? 'За зростанням' : 'За спаданням'}
+                    </Button>
+                    <Button
+                      variant={showEvacuated ? "contained" : "outlined"}
+                      color="primary"
+                      size="small"
+                      onClick={() => setShowEvacuated(!showEvacuated)}
+                    >
+                      {showEvacuated ? "Приховати евакуйованих" : "Показати евакуйованих"}
+                    </Button>
                     <TextField
                       placeholder="Пошук за ім'ям або підрозділом"
                       size="small"
@@ -330,6 +421,7 @@ const SoldierList = () => {
                         <MenuItem value="critical">Критичний стан</MenuItem>
                         <MenuItem value="evacuation">В евакуації</MenuItem>
                         <MenuItem value="needs_evacuation">Потребує евакуації</MenuItem>
+                        <MenuItem value="evacuated">Евакуйовані</MenuItem>
                       </Select>
                     </FormControl>
                   </Box>
