@@ -134,19 +134,17 @@ class Alert(models.Model):
         return f"{self.get_alert_type_display()} - {self.soldier} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
 
 class UserProfile(models.Model):
-    USER_ROLES = [
+    ROLE_CHOICES = [
         ('ADMIN', 'Адміністратор'),
-        ('MEDICAL', 'Медичний персонал'),
-        ('EVACUATION', 'Евакуаційна команда'),
-        ('ANALYST', 'Аналітик'),
-        ('VIEWER', 'Спостерігач')
+        ('RECRUITER', 'Рекрутер'),
+        ('MEDICAL', 'Медичний персонал')
     ]
     
-    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile', verbose_name='Користувач')
-    role = models.CharField(max_length=20, choices=USER_ROLES, default='VIEWER', verbose_name='Роль')
-    phone = models.CharField(max_length=20, blank=True, null=True, verbose_name='Телефон')
-    position = models.CharField(max_length=100, blank=True, null=True, verbose_name='Посада')
-    unit = models.CharField(max_length=200, blank=True, null=True, verbose_name='Підрозділ')
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='MEDICAL')
+    phone = models.CharField(max_length=20, blank=True, null=True)
+    position = models.CharField(max_length=100, blank=True, null=True)
+    unit = models.CharField(max_length=100, blank=True, null=True)
     last_activity = models.DateTimeField(auto_now=True, verbose_name='Остання активність')
     
     def __str__(self):
@@ -177,21 +175,13 @@ class UserProfile(models.Model):
             groups = Group.objects.all()
             self.user.is_staff = True
             self.user.is_superuser = True
+        elif self.role == 'RECRUITER':
+            groups = Group.objects.filter(name__in=['recruiters'])
+            self.user.is_staff = True
+            self.user.is_superuser = False
         elif self.role == 'MEDICAL':
             groups = Group.objects.filter(name__in=['medical_staff'])
             self.user.is_staff = True
-            self.user.is_superuser = False
-        elif self.role == 'EVACUATION':
-            groups = Group.objects.filter(name__in=['evacuation_team'])
-            self.user.is_staff = False
-            self.user.is_superuser = False
-        elif self.role == 'ANALYST':
-            groups = Group.objects.filter(name__in=['analysts'])
-            self.user.is_staff = True
-            self.user.is_superuser = False
-        else:  # 'VIEWER' та інші ролі
-            groups = Group.objects.filter(name__in=[])
-            self.user.is_staff = False
             self.user.is_superuser = False
         
         # Додаємо користувача до відповідних груп

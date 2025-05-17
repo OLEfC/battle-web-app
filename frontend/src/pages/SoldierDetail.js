@@ -32,6 +32,7 @@ import {
   MenuItem,
   FormControl,
   InputLabel,
+  Snackbar
 } from '@mui/material';
 import ArrowBackIcon from '@mui/icons-material/ArrowBack';
 import PersonIcon from '@mui/icons-material/Person';
@@ -40,7 +41,8 @@ import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
 import DevicesIcon from '@mui/icons-material/Devices';
 import DirectionsCarIcon from '@mui/icons-material/DirectionsCar';
 import RefreshIcon from '@mui/icons-material/Refresh';
-import { soldierService } from '../utils/api';
+import DeleteIcon from '@mui/icons-material/Delete';
+import { soldierService, userService } from '../utils/api';
 import Navigation from '../components/Navigation';
 // Import Chart.js components
 import {
@@ -87,6 +89,22 @@ const SoldierDetail = () => {
   const [medicalHistory, setMedicalHistory] = useState(null);
   const [medicalHistoryLoading, setMedicalHistoryLoading] = useState(false);
   const [timeFilter, setTimeFilter] = useState('7'); // Default to 7 days
+  const [successMessage, setSuccessMessage] = useState('');
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [userRole, setUserRole] = useState(null);
+
+  useEffect(() => {
+    // Отримуємо роль користувача при завантаженні компонента
+    const fetchUserRole = async () => {
+      try {
+        const response = await userService.getProfile();
+        setUserRole(response.data.profile?.role);
+      } catch (err) {
+        console.error('Помилка отримання ролі користувача:', err);
+      }
+    };
+    fetchUserRole();
+  }, []);
 
   const fetchSoldierData = useCallback(async (showRefreshIndicator = false) => {
     try {
@@ -109,6 +127,13 @@ const SoldierDetail = () => {
       setError(null);
     } catch (err) {
       console.error('Помилка завантаження даних:', err);
+      
+      // Якщо це 404 помилка і ми вже видалили солдата, не показуємо помилку
+      if (err.response && err.response.status === 404 && !soldier) {
+        navigate('/soldiers');
+        return;
+      }
+      
       setError('Не вдалося завантажити дані про військового');
       setLoading(false);
       setRefreshing(false);
@@ -223,6 +248,27 @@ const SoldierDetail = () => {
 
   const handleTimeFilterChange = (event) => {
     setTimeFilter(event.target.value);
+  };
+
+  const handleDeleteClick = () => {
+    setDeleteDialogOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    try {
+      await soldierService.deleteSoldier(devEui);
+      setSuccessMessage('Військового успішно видалено');
+      // Встановлюємо soldier в null перед перенаправленням
+      setSoldier(null);
+      setTimeout(() => {
+        navigate('/soldiers');
+      }, 2000);
+    } catch (err) {
+      console.error('Помилка видалення військового:', err);
+      setError(err.response?.data?.error || 'Не вдалося видалити військового');
+    } finally {
+      setDeleteDialogOpen(false);
+    }
   };
 
   if (loading) {
@@ -499,6 +545,13 @@ const SoldierDetail = () => {
                 <RefreshIcon />
               </IconButton>
             </Tooltip>
+            {(userRole === 'ADMIN' || userRole === 'RECRUITER') && (
+              <Tooltip title="Видалити військового">
+                <IconButton onClick={handleDeleteClick} color="error" sx={{ ml: 1 }}>
+                  <DeleteIcon />
+                </IconButton>
+              </Tooltip>
+            )}
             {lastUpdate && (
               <Typography variant="caption" color="text.secondary" sx={{ ml: 1 }}>
                 Оновлено: {lastUpdate.toLocaleTimeString('uk-UA', {
@@ -760,6 +813,32 @@ const SoldierDetail = () => {
           </Button>
         </DialogActions>
       </Dialog>
+
+      <Dialog
+        open={deleteDialogOpen}
+        onClose={() => setDeleteDialogOpen(false)}
+      >
+        <DialogTitle>Видалити військового</DialogTitle>
+        <DialogContent>
+          <DialogContentText>
+            Ви дійсно бажаєте видалити військового {soldier?.first_name} {soldier?.last_name}? 
+            Ця дія не може бути скасована.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDeleteDialogOpen(false)}>Скасувати</Button>
+          <Button onClick={handleDeleteConfirm} color="error" variant="contained">
+            Видалити
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Snackbar
+        open={!!successMessage}
+        autoHideDuration={6000}
+        onClose={() => setSuccessMessage('')}
+        message={successMessage}
+      />
     </Box>
   );
 };

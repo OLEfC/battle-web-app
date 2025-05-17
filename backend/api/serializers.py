@@ -123,6 +123,42 @@ class GroupSerializer(serializers.ModelSerializer):
         fields = ['id', 'name']
 
 class UserProfileSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    email = serializers.EmailField(source='user.email', read_only=True)
+    first_name = serializers.CharField(source='user.first_name', read_only=True)
+    last_name = serializers.CharField(source='user.last_name', read_only=True)
+    is_active = serializers.BooleanField(source='user.is_active', read_only=True)
+    last_login = serializers.DateTimeField(source='user.last_login', read_only=True)
+    
+    class Meta:
+        model = UserProfile
+        fields = [
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'role', 'phone', 'position', 'unit', 'is_active',
+            'last_login', 'last_activity'
+        ]
+        read_only_fields = ['id', 'last_activity']
+        extra_kwargs = {
+            'role': {'required': True},
+            'phone': {'required': False, 'allow_blank': True},
+            'position': {'required': False, 'allow_blank': True},
+            'unit': {'required': False, 'allow_blank': True}
+        }
+    
+    def validate_phone(self, value):
+        """Validate phone number format"""
+        if value and not value.replace('+', '').replace('-', '').replace(' ', '').isdigit():
+            raise serializers.ValidationError("Phone number must contain only digits, spaces, hyphens, and plus sign")
+        return value
+    
+    def validate_role(self, value):
+        """Перевіряє, чи є роль допустимою"""
+        valid_roles = [role[0] for role in UserProfile.ROLE_CHOICES]
+        if value not in valid_roles:
+            raise serializers.ValidationError(f"Недопустима роль. Дозволені ролі: {', '.join(valid_roles)}")
+        return value
+
+class UserProfileCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = UserProfile
         fields = ['role', 'phone', 'position', 'unit']
@@ -132,6 +168,19 @@ class UserProfileSerializer(serializers.ModelSerializer):
             'position': {'required': False, 'allow_blank': True},
             'unit': {'required': False, 'allow_blank': True}
         }
+    
+    def validate_phone(self, value):
+        """Validate phone number format"""
+        if value and not value.replace('+', '').replace('-', '').replace(' ', '').isdigit():
+            raise serializers.ValidationError("Phone number must contain only digits, spaces, hyphens, and plus sign")
+        return value
+    
+    def validate_role(self, value):
+        """Перевіряє, чи є роль допустимою"""
+        valid_roles = [role[0] for role in UserProfile.ROLE_CHOICES]
+        if value not in valid_roles:
+            raise serializers.ValidationError(f"Недопустима роль. Дозволені ролі: {', '.join(valid_roles)}")
+        return value
 
 class UserSerializer(serializers.ModelSerializer):
     profile = UserProfileSerializer(required=False)
@@ -167,11 +216,16 @@ class UserSerializer(serializers.ModelSerializer):
 class UserCreateSerializer(serializers.ModelSerializer):
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
-    profile = UserProfileSerializer(required=True)
+    profile = UserProfileCreateSerializer(required=True)
     
     class Meta:
         model = User
         fields = ['username', 'password', 'password2', 'email', 'first_name', 'last_name', 'profile']
+        extra_kwargs = {
+            'email': {'required': False, 'allow_blank': True},
+            'first_name': {'required': False, 'allow_blank': True},
+            'last_name': {'required': False, 'allow_blank': True}
+        }
     
     def validate(self, attrs):
         if attrs['password'] != attrs['password2']:

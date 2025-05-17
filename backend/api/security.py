@@ -59,18 +59,18 @@ class SecurityMiddleware:
         logger.info(json.dumps(log_data))
 
 # Нова функція для прямого логування дій безпеки
-def log_security_action(action_type, message, request=None):
+def log_security_action(request, message, action_type=None):
     """
     Логування дій безпеки
     
     Args:
-        action_type (str): Тип дії (напр., 'login_success', 'logout', тощо)
+        request (HttpRequest): Об'єкт запиту Django
         message (str): Повідомлення з деталями події
-        request (HttpRequest, optional): Об'єкт запиту Django
+        action_type (str, optional): Тип дії (напр., 'login_success', 'logout', тощо)
     """
     log_data = {
         'timestamp': datetime.now().isoformat(),
-        'action_type': action_type,
+        'action_type': action_type or 'security_action',
         'message': message,
         'taskName': None
     }

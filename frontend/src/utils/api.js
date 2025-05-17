@@ -185,6 +185,16 @@ const soldierService = {
   
   cancelEvacuation: async (soldierId) => {
     return api.post(`/api/soldiers/${soldierId}/cancel_evacuation/`);
+  },
+  
+  // Видалення військового
+  deleteSoldier: async (devEui) => {
+    try {
+      const response = await api.delete(`/api/soldiers/${devEui}/`);
+      return response.data;
+    } catch (error) {
+      throw error;
+    }
   }
 };
 
@@ -281,6 +291,7 @@ const userService = {
   
   // Створити нового користувача (тільки для адміністраторів)
   createUser: async (userData) => {
+    console.log(userData);
     return api.post('/api/users/', userData);
   },
   

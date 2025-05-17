@@ -15,12 +15,21 @@ from django.db.models import Q
 from django.contrib.auth.models import User, Group
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
-from .services.chirpstack import create_chirpstack_device
+from .services.chirpstack import create_chirpstack_device, delete_device
 from django.db import models, transaction
 from datetime import datetime, timedelta
 from django.db.models import Count, Avg, F, Q
 import random
-from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken
+import logging
+
+# Налаштування логування
+# logging.basicConfig(
+#     level=logging.INFO,
+#     format='%(asctime)s [%(levelname)s] %(message)s',
+#     datefmt='%Y-%m-%d %H:%M:%S'
+# )
+logger = logging.getLogger(__name__)
 
 # Користувацькі права доступу
 class IsMedicalStaff(BasePermission):
@@ -42,6 +51,14 @@ class IsAdmin(BasePermission):
     """Перевірка чи користувач є адміністратором"""
     def has_permission(self, request, view):
         return request.user.is_superuser or (hasattr(request.user, 'profile') and request.user.profile.role == 'ADMIN')
+
+class IsRecruiter(BasePermission):
+    """Перевірка чи користувач є рекрутером"""
+    def has_permission(self, request, view):
+        return request.user.is_authenticated and (
+            request.user.is_superuser or 
+            (hasattr(request.user, 'profile') and request.user.profile.role in ['ADMIN', 'RECRUITER'])
+        )
 
 class UserProfileView(APIView):
     permission_classes = [IsAuthenticated]
@@ -163,9 +180,9 @@ class SoldierViewSet(viewsets.ModelViewSet):
     def get_permissions(self):
         """Визначення прав доступу в залежності від дії"""
         if self.action in ['create', 'update', 'partial_update', 'destroy']:
-            permission_classes = [IsAuthenticated, IsMedicalStaff]
+            permission_classes = [IsAuthenticated, IsRecruiter]
         elif self.action in ['start_evacuation', 'complete_evacuation', 'cancel_evacuation']:
-            permission_classes = [IsAuthenticated, IsEvacuationTeam]
+            permission_classes = [IsAuthenticated, IsMedicalStaff]
         elif self.action in ['analytics', 'issues_summary', 'evacuation_summary']:
             permission_classes = [IsAuthenticated, IsAnalyst]
         else:
@@ -869,6 +886,33 @@ class SoldierViewSet(viewsets.ModelViewSet):
             'medical_records': serializer.data
         })
 
+    def destroy(self, request, *args, **kwargs):
+        """Видалення військового"""
+        try:
+            soldier = self.get_object()
+            
+            # Видаляємо пристрій з ChirpStack
+            try:
+                delete_device(soldier.devEui)
+            except Exception as e:
+                logger.warning(f"Не вдалося видалити пристрій {soldier.devEui} з ChirpStack: {str(e)}")
+            
+            # Видаляємо військового з бази даних
+            soldier.delete()
+            
+            return Response(status=status.HTTP_204_NO_CONTENT)
+        except Soldier.DoesNotExist:
+            return Response(
+                {'error': 'Військовий не знайдений'},
+                status=status.HTTP_404_NOT_FOUND
+            )
+        except Exception as e:
+            logger.error(f"Помилка при видаленні військового: {str(e)}")
+            return Response(
+                {'error': f'Помилка при видаленні військового: {str(e)}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
 def check_critical_duration(soldier):
     """Перевіряє тривалість критичного стану"""
     critical_records = MedicalData.objects.filter(
@@ -1178,24 +1222,35 @@ class UserManagementView(APIView):
     
     def post(self, request):
         """Створити нового користувача"""
+        logger.info(f"Спроба створення користувача з даними: {request.data}")
         serializer = UserCreateSerializer(data=request.data)
-        if serializer.is_valid():
-            try:
-                user = serializer.save()
-                
-                # Логування створення користувача
-                log_security_action(request, f"Створено нового користувача: {user.username}")
-                
-                return Response(
-                    UserSerializer(user).data,
-                    status=status.HTTP_201_CREATED
-                )
-            except Exception as e:
-                return Response(
-                    {"error": f"Помилка при створенні користувача: {str(e)}"},
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-        return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not serializer.is_valid():
+            logger.error(f"Помилки валідації: {serializer.errors}")
+            return Response(
+                {
+                    "error": "Помилка валідації даних",
+                    "details": serializer.errors
+                },
+                status=status.HTTP_400_BAD_REQUEST
+            )
+            
+        try:
+            user = serializer.save()
+            
+            # Логування створення користувача
+            log_security_action(request, f"Створено нового користувача: {user.username}")
+            
+            return Response(
+                UserSerializer(user).data,
+                status=status.HTTP_201_CREATED
+            )
+        except Exception as e:
+            logger.error(f"Помилка при створенні користувача: {str(e)}")
+            return Response(
+                {"error": f"Помилка при створенні користувача: {str(e)}"},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
 class UserDetailView(APIView):
     permission_classes = [IsAuthenticated, IsAdmin]
@@ -1237,29 +1292,52 @@ class UserDetailView(APIView):
             with transaction.atomic():
                 user = self.get_object(pk)
                 username = user.username
+                logger.info(f"Початок видалення користувача {username} (ID: {pk})")
                 
                 # Не дозволяємо видаляти самого себе
                 if user == request.user:
+                    logger.warning(f"Спроба видалення власного облікового запису користувачем {request.user.username}")
                     return Response(
                         {"error": "Неможливо видалити власний обліковий запис"},
                         status=status.HTTP_400_BAD_REQUEST
                     )
                 
-                # Видаляємо всі токени користувача
-                OutstandingToken.objects.filter(user_id=user.id).delete()
+                try:
+                    # Видаляємо всі токени користувача
+                    tokens_count = OutstandingToken.objects.filter(user_id=user.id).count()
+                    logger.info(f"Знайдено {tokens_count} токенів для видалення")
+                    OutstandingToken.objects.filter(user_id=user.id).delete()
+                    logger.info("Токени успішно видалено")
+                except Exception as token_error:
+                    logger.error(f"Помилка при видаленні токенів: {str(token_error)}")
+                    raise
                 
-                # Видаляємо профіль користувача
-                if hasattr(user, 'profile'):
-                    user.profile.delete()
+                try:
+                    # Видаляємо профіль користувача
+                    if hasattr(user, 'profile'):
+                        user.profile.delete()
+                        logger.info("Профіль користувача успішно видалено")
+                except Exception as profile_error:
+                    logger.error(f"Помилка при видаленні профілю: {str(profile_error)}")
+                    raise
                 
-                # Видаляємо користувача
-                user.delete()
+                try:
+                    # Видаляємо користувача
+                    user.delete()
+                    logger.info(f"Користувач {username} успішно видалено")
+                except Exception as user_error:
+                    logger.error(f"Помилка при видаленні користувача: {str(user_error)}")
+                    raise
                 
                 # Логування видалення користувача
                 log_security_action(request, f"Видалено користувача: {username}")
                 
                 return Response(status=status.HTTP_204_NO_CONTENT)
         except Exception as e:
+            logger.error(f"Помилка при видаленні користувача: {str(e)}")
+            logger.error(f"Тип помилки: {type(e)}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return Response(
                 {"error": f"Помилка при видаленні користувача: {str(e)}"},
                 status=status.HTTP_400_BAD_REQUEST

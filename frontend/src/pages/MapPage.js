@@ -176,7 +176,7 @@ const MapPage = () => {
   const [error, setError] = useState(null);
   const [selectedSoldier, setSelectedSoldier] = useState(null);
   const [mapCenter, setMapCenter] = useState(null);
-  const [mapZoom, setMapZoom] = useState(15); // Higher zoom level for better visibility when centering
+  const [mapZoom, setMapZoom] = useState(13);
   const [activeSoldierId, setActiveSoldierId] = useState(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
   
@@ -193,15 +193,89 @@ const MapPage = () => {
   
   const navigate = useNavigate();
 
-  // Виносимо fetchSoldiers у useCallback, щоб правильно використовувати у useEffect
+  // Функція для розрахунку оптимального центру карти та рівня збільшення
+  const calculateMapBounds = useCallback((soldiersData) => {
+    if (!soldiersData || soldiersData.length === 0) {
+      return {
+        center: [49.841817, 24.031695], // Львів за замовчуванням
+        zoom: 13
+      };
+    }
+
+    // Фільтруємо солдатів з валідними координатами
+    const validSoldiers = soldiersData.filter(
+      soldier => soldier.latest_data && 
+                soldier.latest_data.latitude && 
+                soldier.latest_data.longitude
+    );
+
+    if (validSoldiers.length === 0) {
+      return {
+        center: [49.841817, 24.031695],
+        zoom: 13
+      };
+    }
+
+    if (validSoldiers.length === 1) {
+      return {
+        center: [validSoldiers[0].latest_data.latitude, validSoldiers[0].latest_data.longitude],
+        zoom: 15
+      };
+    }
+
+    // Знаходимо мінімальні та максимальні координати
+    let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+    
+    validSoldiers.forEach(soldier => {
+      const lat = soldier.latest_data.latitude;
+      const lng = soldier.latest_data.longitude;
+      
+      minLat = Math.min(minLat, lat);
+      maxLat = Math.max(maxLat, lat);
+      minLng = Math.min(minLng, lng);
+      maxLng = Math.max(maxLng, lng);
+    });
+
+    // Розраховуємо центр
+    const centerLat = (minLat + maxLat) / 2;
+    const centerLng = (minLng + maxLng) / 2;
+
+    // Розраховуємо відстань між крайніми точками
+    const latDiff = maxLat - minLat;
+    const lngDiff = maxLng - minLng;
+    
+    // Конвертуємо градуси в кілометри (приблизно)
+    const latDiffKm = latDiff * 111.32; // 1 градус широти ≈ 111.32 км
+    const lngDiffKm = lngDiff * 111.32 * Math.cos(centerLat * Math.PI / 180); // Коригуємо довготу на широту
+    
+    // Беремо максимальну відстань
+    const maxDiffKm = Math.max(latDiffKm, lngDiffKm);
+
+    // Визначаємо оптимальний рівень збільшення на основі відстані в кілометрах
+    let zoom;
+    if (maxDiffKm > 100) zoom = 7;        // Дуже велика відстань
+    else if (maxDiffKm > 50) zoom = 8;    // Велика відстань
+    else if (maxDiffKm > 20) zoom = 9;    // Середньо-велика відстань
+    else if (maxDiffKm > 10) zoom = 10;   // Середня відстань
+    else if (maxDiffKm > 5) zoom = 11;    // Середньо-мала відстань
+    else if (maxDiffKm > 2) zoom = 12;    // Мала відстань
+    else if (maxDiffKm > 1) zoom = 13;    // Дуже мала відстань
+    else if (maxDiffKm > 0.5) zoom = 14;  // Мінімальна відстань
+    else zoom = 15;                       // Дуже близькі точки
+
+    // Додаємо невеликий відступ для кращого відображення
+    return {
+      center: [centerLat, centerLng],
+      zoom: Math.max(7, zoom - 1) // Обмежуємо мінімальний рівень збільшення
+    };
+  }, []);
+
+  // Оголошуємо fetchSoldiers перед useEffect
   const fetchSoldiers = useCallback(async () => {
     try {
-      // Отримуємо дані з пріоритезованого API
       const response = await soldierService.getPrioritizedSoldiers();
       
-      // Перевіряємо, чи отримали масив даних
       if (Array.isArray(response.data)) {
-        // Фільтруємо відповідь, щоб відображати тільки записи з географічними даними
         const validSoldiers = response.data.filter(
           soldier => soldier.latest_data && 
                     soldier.latest_data.latitude && 
@@ -209,6 +283,11 @@ const MapPage = () => {
         );
         
         setSoldiers(validSoldiers);
+        
+        // Розраховуємо оптимальний центр та збільшення
+        const { center, zoom } = calculateMapBounds(validSoldiers);
+        setMapCenter(center);
+        setMapZoom(zoom);
       } else {
         console.error('Unexpected API response format:', response.data);
         setError('Отримано неправильний формат даних з API');
@@ -220,16 +299,15 @@ const MapPage = () => {
       setError('Помилка завантаження даних');
       setLoading(false);
       
-      // Якщо помилка авторизації - перенаправляємо на сторінку логіну
       if (err.response && err.response.status === 401) {
         localStorage.removeItem('isAuthenticated');
         navigate('/login');
       }
     }
-  }, [navigate]);
+  }, [navigate, calculateMapBounds]);
 
+  // useEffect після оголошення fetchSoldiers
   useEffect(() => {
-    // Перевіряємо авторизацію
     const isAuthenticated = localStorage.getItem('isAuthenticated');
     if (!isAuthenticated) {
       navigate('/login');
@@ -1023,10 +1101,8 @@ const MapPage = () => {
             )}
             
             <MapContainer 
-              center={soldiers.length > 0 && soldiers[0].latest_data ? 
-                [soldiers[0].latest_data.latitude, soldiers[0].latest_data.longitude] : 
-                [49.841817, 24.031695]} // Львів за замовчуванням
-              zoom={13} 
+              center={mapCenter || [49.841817, 24.031695]}
+              zoom={mapZoom}
               style={{ height: '100%', width: '100%' }}
             >
               {/* Компонент для керування видимою областю карти */}

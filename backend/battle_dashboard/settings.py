@@ -63,6 +63,7 @@ INSTALLED_APPS = [
     'corsheaders',  # CORS headers for API
     'api',
     'mqtt_client',
+    'rest_framework_simplejwt.token_blacklist',
 ]
 
 MIDDLEWARE = [

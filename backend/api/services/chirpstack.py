@@ -11,7 +11,8 @@ try:
         Device, 
         GetDeviceRequest,
         DeviceKeys,
-        CreateDeviceKeysRequest
+        CreateDeviceKeysRequest,
+        DeleteDeviceRequest
     )
     from chirpstack_api.api.device_pb2_grpc import DeviceServiceStub
     CHIRPSTACK_API_AVAILABLE = True
@@ -144,6 +145,43 @@ def create_chirpstack_device(dev_eui: str, name: str, join_eui: str = None, app_
         
     except Exception as e:
         print(f"Error creating ChirpStack device: {str(e)}")
+        return False
+    finally:
+        if 'channel' in locals():
+            channel.close() 
+
+def delete_device(dev_eui: str) -> bool:
+    """
+    Delete a device from ChirpStack
+    Returns True if successful, False otherwise
+    """
+    try:
+        # Format DEV_EUI
+        dev_eui = format_hex_field(dev_eui, 16, "DEV_EUI")
+        
+        # In development mode, skip the actual API call
+        if DEVELOPMENT_MODE or not CHIRPSTACK_API_AVAILABLE:
+            print(f"WARNING: Running in development mode - skipping actual ChirpStack API call")
+            print(f"Would have deleted device with DEV_EUI: {dev_eui}")
+            return True
+
+        # Create gRPC channel
+        channel = grpc.insecure_channel(CHIRPSTACK_HOST)
+        client = DeviceServiceStub(channel)
+        
+        # Create metadata with API token
+        metadata = [('authorization', f'Bearer {API_TOKEN}')]
+        
+        # Create delete request
+        req = DeleteDeviceRequest(dev_eui=dev_eui)
+        
+        # Delete device
+        client.Delete(req, metadata=metadata)
+        
+        return True
+        
+    except Exception as e:
+        print(f"Error deleting ChirpStack device: {str(e)}")
         return False
     finally:
         if 'channel' in locals():
