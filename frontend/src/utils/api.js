@@ -60,9 +60,11 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // Якщо помилка авторизації (401), перенаправляємо на сторінку логінації
-    if (error.response && error.response.status === 401) {
+    // Якщо помилка авторизації (401) або заборона доступу (403), перенаправляємо на сторінку логінації
+    if (error.response && (error.response.status === 401 || error.response.status === 403)) {
       localStorage.removeItem('isAuthenticated');
+      localStorage.removeItem('username');
+      localStorage.removeItem('isAdmin');
       window.location.href = '/login';
     }
     return Promise.reject(error);
